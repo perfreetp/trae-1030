@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Card,
   Table,
@@ -13,6 +13,11 @@ import {
   Badge,
   Input,
   Select,
+  Form,
+  InputNumber,
+  Drawer,
+  Timeline,
+  Descriptions,
 } from 'antd';
 import {
   Users,
@@ -27,12 +32,17 @@ import {
   Wrench,
   Shield,
   Zap,
+  Clock,
+  FileText,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
 import dayjs from 'dayjs';
-import type { ResourceTeam, Material, DutyPerson } from '../../types';
-import { mockResourceTeams, mockMaterials, mockDutyPersons } from '../../mock';
+import type { ResourceTeam, Material, DutyPerson, DispatchRecord, MaterialDispatch } from '../../types';
+import { useAppStore } from '../../store';
 
 const { Option } = Select;
+const { TextArea } = Input;
 
 const statusTextMap: Record<string, string> = {
   idle: '待命',
@@ -48,24 +58,235 @@ const statusColorMap: Record<string, string> = {
   rest: 'default',
 };
 
+const dispatchStatusTextMap: Record<string, string> = {
+  pending: '待出发',
+  dispatched: '已出发',
+  arrived: '已到达',
+  working: '作业中',
+  completed: '已完成',
+  cancelled: '已取消',
+};
+
+const dispatchStatusColorMap: Record<string, string> = {
+  pending: 'default',
+  dispatched: 'processing',
+  arrived: 'blue',
+  working: 'orange',
+  completed: 'success',
+  cancelled: 'red',
+};
+
 const materialStatusMap: Record<string, { text: string; color: string }> = {
   available: { text: '充足', color: 'success' },
   dispatched: { text: '已调派', color: 'processing' },
   insufficient: { text: '不足', color: 'red' },
 };
 
+const materialDispatchStatusMap: Record<string, { text: string; color: string }> = {
+  pending: { text: '待审批', color: 'default' },
+  approved: { text: '已批准', color: 'processing' },
+  in_transit: { text: '运输中', color: 'orange' },
+  delivered: { text: '已送达', color: 'success' },
+  cancelled: { text: '已取消', color: 'red' },
+};
+
 const tabItems = [
   { key: 'teams', label: '救援队伍', icon: <Users size={16} /> },
   { key: 'materials', label: '应急物资', icon: <Package size={16} /> },
   { key: 'duty', label: '值班人员', icon: <Bell size={16} /> },
+  { key: 'records', label: '调派记录', icon: <FileText size={16} /> },
 ];
 
 export default function ResourceDispatch() {
   const [activeTab, setActiveTab] = useState('teams');
-  const [teams] = useState<ResourceTeam[]>(mockResourceTeams);
-  const [materials] = useState<Material[]>(mockMaterials);
-  const [dutyPersons, setDutyPersons] = useState<DutyPerson[]>(mockDutyPersons);
+  const {
+    resourceTeams,
+    materials,
+    events,
+    dispatchRecords,
+    materialDispatches,
+    updateResourceTeam,
+    addDispatchRecord,
+    updateDispatchRecord,
+    addMaterialDispatch,
+    updateMaterial,
+  } = useAppStore();
+  
+  const [dutyPersons, setDutyPersons] = useState<DutyPerson[]>([
+    { id: '1', name: '张明', position: '应急指挥中心主任', department: '调度处', phone: '13900139001', isOnDuty: true },
+    { id: '2', name: '李华', position: '工务处处长', department: '工务处', phone: '13900139002', isOnDuty: true },
+    { id: '3', name: '王强', position: '机务处副处长', department: '机务处', phone: '13900139003', isOnDuty: true },
+    { id: '4', name: '赵伟', position: '电务处处长', department: '电务处', phone: '13900139004', isOnDuty: false },
+  ]);
+  
   const [notifyModalOpen, setNotifyModalOpen] = useState(false);
+  const [dispatchModalOpen, setDispatchModalOpen] = useState(false);
+  const [materialDispatchModalOpen, setMaterialDispatchModalOpen] = useState(false);
+  const [recordDrawerOpen, setRecordDrawerOpen] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState<ResourceTeam | null>(null);
+  const [selectedMaterial, setSelectedMaterial] = useState<Material | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<DispatchRecord | null>(null);
+  const [dispatchForm] = Form.useForm();
+  const [materialDispatchForm] = Form.useForm();
+  
+  const [teamSearch, setTeamSearch] = useState('');
+  const [materialSearch, setMaterialSearch] = useState('');
+  const [materialCategory, setMaterialCategory] = useState<string | undefined>();
+  const [materialWarehouse, setMaterialWarehouse] = useState<string | undefined>();
+  const [materialStatus, setMaterialStatus] = useState<string | undefined>();
+
+  const filteredTeams = useMemo(() => {
+    return resourceTeams.filter((team) => {
+      if (teamSearch) {
+        const keyword = teamSearch.toLowerCase();
+        return team.name.toLowerCase().includes(keyword) || team.type.toLowerCase().includes(keyword);
+      }
+      return true;
+    });
+  }, [resourceTeams, teamSearch]);
+
+  const filteredMaterials = useMemo(() => {
+    return materials.filter((material) => {
+      if (materialSearch) {
+        const keyword = materialSearch.toLowerCase();
+        if (!material.name.toLowerCase().includes(keyword)) return false;
+      }
+      if (materialCategory && material.category !== materialCategory) return false;
+      if (materialWarehouse && material.warehouse !== materialWarehouse) return false;
+      if (materialStatus && material.status !== materialStatus) return false;
+      return true;
+    });
+  }, [materials, materialSearch, materialCategory, materialWarehouse, materialStatus]);
+
+  const categories = [...new Set(materials.map((m) => m.category))];
+  const warehouses = [...new Set(materials.map((m) => m.warehouse))];
+
+  const handleDispatch = (team: ResourceTeam) => {
+    setSelectedTeam(team);
+    dispatchForm.resetFields();
+    setDispatchModalOpen(true);
+  };
+
+  const confirmDispatch = async () => {
+    try {
+      const values = await dispatchForm.validateFields();
+      const event = events.find((e) => e.id === values.eventId);
+      
+      const newRecord: DispatchRecord = {
+        id: `disp${Date.now()}`,
+        eventId: values.eventId,
+        eventTitle: event?.title || '',
+        teamId: selectedTeam!.id,
+        teamName: selectedTeam!.name,
+        dispatchTime: new Date().toISOString(),
+        status: 'dispatched',
+        taskDescription: values.taskDescription,
+        operator: '当前用户',
+      };
+
+      addDispatchRecord(newRecord);
+      
+      const updatedTeam: ResourceTeam = {
+        ...selectedTeam!,
+        status: 'dispatched',
+        currentTask: event?.title || values.taskDescription,
+      };
+      updateResourceTeam(updatedTeam);
+
+      message.success(`已成功调派 ${selectedTeam!.name}`);
+      setDispatchModalOpen(false);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleMaterialDispatch = (material: Material) => {
+    setSelectedMaterial(material);
+    materialDispatchForm.resetFields();
+    setMaterialDispatchModalOpen(true);
+  };
+
+  const confirmMaterialDispatch = async () => {
+    try {
+      const values = await materialDispatchForm.validateFields();
+      const event = events.find((e) => e.id === values.eventId);
+      
+      const newDispatch: MaterialDispatch = {
+        id: `matdisp${Date.now()}`,
+        eventId: values.eventId,
+        eventTitle: event?.title || '',
+        materialId: selectedMaterial!.id,
+        materialName: selectedMaterial!.name,
+        quantity: values.quantity,
+        unit: selectedMaterial!.unit,
+        fromWarehouse: selectedMaterial!.warehouse,
+        toLocation: values.toLocation,
+        applyTime: new Date().toISOString(),
+        status: 'pending',
+        applicant: '当前用户',
+        remark: values.remark,
+      };
+
+      addMaterialDispatch(newDispatch);
+
+      const remainingQty = selectedMaterial!.quantity - values.quantity;
+      const updatedMaterial: Material = {
+        ...selectedMaterial!,
+        quantity: remainingQty,
+        status: remainingQty <= 0 ? 'insufficient' : remainingQty < 50 ? 'insufficient' : 'available',
+      };
+      updateMaterial(updatedMaterial);
+
+      message.success(`已申请调拨 ${values.quantity} ${selectedMaterial!.unit} ${selectedMaterial!.name}`);
+      setMaterialDispatchModalOpen(false);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleViewRecord = (record: DispatchRecord) => {
+    setSelectedRecord(record);
+    setRecordDrawerOpen(true);
+  };
+
+  const handleUpdateDispatchStatus = (record: DispatchRecord, newStatus: string) => {
+    const updated: DispatchRecord = {
+      ...record,
+      status: newStatus as any,
+      ...(newStatus === 'arrived' && { arriveTime: new Date().toISOString() }),
+      ...(newStatus === 'completed' && { completeTime: new Date().toISOString() }),
+    };
+    updateDispatchRecord(updated);
+
+    if (selectedTeam) {
+      const teamStatus = newStatus === 'working' ? 'working' : newStatus === 'completed' ? 'idle' : 'dispatched';
+      updateResourceTeam({ ...selectedTeam, status: teamStatus as any });
+    }
+
+    message.success(`状态已更新为: ${dispatchStatusTextMap[newStatus]}`);
+  };
+
+  const handleNotifyAll = () => {
+    setNotifyModalOpen(true);
+  };
+
+  const confirmNotify = () => {
+    const now = new Date().toISOString();
+    setDutyPersons(
+      dutyPersons.map((p) =>
+        p.isOnDuty ? { ...p, lastNotifyTime: now } : p
+      )
+    );
+    message.success('已通知所有值班人员');
+    setNotifyModalOpen(false);
+  };
+
+  const resetMaterialFilters = () => {
+    setMaterialSearch('');
+    setMaterialCategory(undefined);
+    setMaterialWarehouse(undefined);
+    setMaterialStatus(undefined);
+  };
 
   const teamColumns = [
     {
@@ -121,17 +342,6 @@ export default function ResourceDispatch() {
       ),
     },
     {
-      title: '联系方式',
-      dataIndex: 'contact',
-      key: 'contact',
-      render: (contact: string) => (
-        <span className="text-sm">
-          <Phone size={12} className="inline mr-1 text-slate-400" />
-          {contact}
-        </span>
-      ),
-    },
-    {
       title: '当前任务',
       dataIndex: 'currentTask',
       key: 'currentTask',
@@ -146,11 +356,10 @@ export default function ResourceDispatch() {
             type="primary"
             size="small"
             disabled={record.status === 'working'}
-            onClick={() => message.success(`已向 ${record.name} 发出调派指令`)}
+            onClick={() => handleDispatch(record)}
           >
             调派
           </Button>
-          <Button size="small">详情</Button>
         </Space>
       ),
     },
@@ -210,7 +419,7 @@ export default function ResourceDispatch() {
             type="primary"
             size="small"
             disabled={record.status !== 'available'}
-            onClick={() => message.success(`已申请调拨 ${record.name}`)}
+            onClick={() => handleMaterialDispatch(record)}
           >
             申请调拨
           </Button>
@@ -219,20 +428,52 @@ export default function ResourceDispatch() {
     },
   ];
 
-  const handleNotifyAll = () => {
-    setNotifyModalOpen(true);
-  };
-
-  const confirmNotify = () => {
-    const now = new Date().toISOString();
-    setDutyPersons(
-      dutyPersons.map((p) =>
-        p.isOnDuty ? { ...p, lastNotifyTime: now } : p
-      )
-    );
-    message.success('已通知所有值班人员');
-    setNotifyModalOpen(false);
-  };
+  const dispatchRecordColumns = [
+    {
+      title: '调派时间',
+      dataIndex: 'dispatchTime',
+      key: 'dispatchTime',
+      render: (time: string) => dayjs(time).format('MM-DD HH:mm'),
+    },
+    {
+      title: '救援队伍',
+      dataIndex: 'teamName',
+      key: 'teamName',
+    },
+    {
+      title: '目标事件',
+      dataIndex: 'eventTitle',
+      key: 'eventTitle',
+      render: (text: string) => (
+        <span className="text-sm">{text}</span>
+      ),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: string) => (
+        <Tag color={dispatchStatusColorMap[status]}>
+          {dispatchStatusTextMap[status]}
+        </Tag>
+      ),
+    },
+    {
+      title: '回执',
+      dataIndex: 'receiptContent',
+      key: 'receiptContent',
+      render: (content: string) => content || '待回执',
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_: any, record: DispatchRecord) => (
+        <Button type="link" size="small" onClick={() => handleViewRecord(record)}>
+          详情
+        </Button>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -252,12 +493,6 @@ export default function ResourceDispatch() {
             }))}
           />
           <Space>
-            <Input
-              placeholder="搜索"
-              prefix={<Search size={14} className="text-slate-400" />}
-              style={{ width: 200 }}
-            />
-            <Button icon={<RefreshCw size={14} />}>刷新</Button>
             {activeTab === 'duty' && (
               <Button type="primary" icon={<Send size={14} />} onClick={handleNotifyAll}>
                 一键通知
@@ -267,21 +502,83 @@ export default function ResourceDispatch() {
         </div>
 
         {activeTab === 'teams' && (
-          <Table
-            columns={teamColumns}
-            dataSource={teams}
-            rowKey="id"
-            pagination={{ pageSize: 8 }}
-          />
+          <>
+            <div className="bg-slate-50 rounded-lg p-3 mb-4">
+              <Input
+                placeholder="搜索队伍名称、类型"
+                prefix={<Search size={14} className="text-slate-400" />}
+                style={{ width: 300 }}
+                allowClear
+                value={teamSearch}
+                onChange={(e) => setTeamSearch(e.target.value)}
+              />
+            </div>
+            <Table
+              columns={teamColumns}
+              dataSource={filteredTeams}
+              rowKey="id"
+              pagination={{ pageSize: 8 }}
+            />
+          </>
         )}
 
         {activeTab === 'materials' && (
-          <Table
-            columns={materialColumns}
-            dataSource={materials}
-            rowKey="id"
-            pagination={{ pageSize: 8 }}
-          />
+          <>
+            <div className="bg-slate-50 rounded-lg p-3 mb-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <Input
+                  placeholder="搜索物资名称"
+                  prefix={<Search size={14} className="text-slate-400" />}
+                  style={{ width: 200 }}
+                  allowClear
+                  value={materialSearch}
+                  onChange={(e) => setMaterialSearch(e.target.value)}
+                />
+                <Select
+                  placeholder="物资类别"
+                  style={{ width: 140 }}
+                  allowClear
+                  value={materialCategory}
+                  onChange={setMaterialCategory}
+                >
+                  {categories.map((c) => (
+                    <Option key={c} value={c}>{c}</Option>
+                  ))}
+                </Select>
+                <Select
+                  placeholder="仓库位置"
+                  style={{ width: 140 }}
+                  allowClear
+                  value={materialWarehouse}
+                  onChange={setMaterialWarehouse}
+                >
+                  {warehouses.map((w) => (
+                    <Option key={w} value={w}>{w}</Option>
+                  ))}
+                </Select>
+                <Select
+                  placeholder="可用状态"
+                  style={{ width: 120 }}
+                  allowClear
+                  value={materialStatus}
+                  onChange={setMaterialStatus}
+                >
+                  <Option value="available">充足</Option>
+                  <Option value="dispatched">已调派</Option>
+                  <Option value="insufficient">不足</Option>
+                </Select>
+                <Button icon={<RefreshCw size={14} />} onClick={resetMaterialFilters}>
+                  重置
+                </Button>
+              </div>
+            </div>
+            <Table
+              columns={materialColumns}
+              dataSource={filteredMaterials}
+              rowKey="id"
+              pagination={{ pageSize: 8 }}
+            />
+          </>
         )}
 
         {activeTab === 'duty' && (
@@ -334,7 +631,241 @@ export default function ResourceDispatch() {
             )}
           />
         )}
+
+        {activeTab === 'records' && (
+          <Table
+            columns={dispatchRecordColumns}
+            dataSource={dispatchRecords}
+            rowKey="id"
+            pagination={{ pageSize: 10 }}
+          />
+        )}
       </Card>
+
+      <Modal
+        title="调派救援队伍"
+        open={dispatchModalOpen}
+        onOk={confirmDispatch}
+        onCancel={() => setDispatchModalOpen(false)}
+        okText="确认调派"
+        cancelText="取消"
+        width={500}
+      >
+        <Form form={dispatchForm} layout="vertical">
+          <Form.Item
+            label="选择事件"
+            name="eventId"
+            rules={[{ required: true, message: '请选择目标事件' }]}
+          >
+            <Select placeholder="请选择目标事件">
+              {events.filter((e) => e.status !== 'closed').map((e) => (
+                <Option key={e.id} value={e.id}>
+                  [{e.level}级] {e.title}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            label="任务描述"
+            name="taskDescription"
+            rules={[{ required: true, message: '请输入任务描述' }]}
+          >
+            <TextArea rows={3} placeholder="请描述具体任务要求" />
+          </Form.Item>
+          {selectedTeam && (
+            <div className="bg-slate-50 p-3 rounded-lg">
+              <p className="text-sm text-slate-600 mb-1">调派队伍：<span className="font-medium">{selectedTeam.name}</span></p>
+              <p className="text-sm text-slate-600">人员数量：<span className="font-medium">{selectedTeam.personCount} 人</span></p>
+            </div>
+          )}
+        </Form>
+      </Modal>
+
+      <Modal
+        title="申请物资调拨"
+        open={materialDispatchModalOpen}
+        onOk={confirmMaterialDispatch}
+        onCancel={() => setMaterialDispatchModalOpen(false)}
+        okText="提交申请"
+        cancelText="取消"
+        width={500}
+      >
+        <Form form={materialDispatchForm} layout="vertical">
+          <Form.Item
+            label="选择事件"
+            name="eventId"
+            rules={[{ required: true, message: '请选择目标事件' }]}
+          >
+            <Select placeholder="请选择目标事件">
+              {events.filter((e) => e.status !== 'closed').map((e) => (
+                <Option key={e.id} value={e.id}>
+                  [{e.level}级] {e.title}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            label="调拨数量"
+            name="quantity"
+            rules={[{ required: true, message: '请输入调拨数量' }]}
+          >
+            <InputNumber
+              min={1}
+              max={selectedMaterial?.quantity || 9999}
+              className="w-full"
+              addonAfter={selectedMaterial?.unit}
+              placeholder="请输入调拨数量"
+            />
+          </Form.Item>
+          <Form.Item
+            label="运往地点"
+            name="toLocation"
+            rules={[{ required: true, message: '请输入运往地点' }]}
+          >
+            <Input placeholder="请输入运往的具体地点" />
+          </Form.Item>
+          <Form.Item label="备注" name="remark">
+            <TextArea rows={2} placeholder="其他备注信息" />
+          </Form.Item>
+          {selectedMaterial && (
+            <div className="bg-slate-50 p-3 rounded-lg">
+              <p className="text-sm text-slate-600 mb-1">
+                物资名称：<span className="font-medium">{selectedMaterial.name}</span>
+              </p>
+              <p className="text-sm text-slate-600 mb-1">
+                当前库存：<span className="font-medium">{selectedMaterial.quantity} {selectedMaterial.unit}</span>
+              </p>
+              <p className="text-sm text-slate-600">
+                存放仓库：<span className="font-medium">{selectedMaterial.warehouse}</span>
+              </p>
+            </div>
+          )}
+        </Form>
+      </Modal>
+
+      <Drawer
+        title="调派记录详情"
+        placement="right"
+        width={480}
+        open={recordDrawerOpen}
+        onClose={() => setRecordDrawerOpen(false)}
+      >
+        {selectedRecord && (
+          <div className="space-y-6">
+            <Descriptions column={1} bordered size="small">
+              <Descriptions.Item label="调派时间">
+                {dayjs(selectedRecord.dispatchTime).format('YYYY-MM-DD HH:mm:ss')}
+              </Descriptions.Item>
+              <Descriptions.Item label="救援队伍">
+                {selectedRecord.teamName}
+              </Descriptions.Item>
+              <Descriptions.Item label="目标事件">
+                {selectedRecord.eventTitle}
+              </Descriptions.Item>
+              <Descriptions.Item label="当前状态">
+                <Tag color={dispatchStatusColorMap[selectedRecord.status]}>
+                  {dispatchStatusTextMap[selectedRecord.status]}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="任务描述">
+                {selectedRecord.taskDescription}
+              </Descriptions.Item>
+              <Descriptions.Item label="回执内容">
+                {selectedRecord.receiptContent || '待回执'}
+              </Descriptions.Item>
+              <Descriptions.Item label="操作人">
+                {selectedRecord.operator}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div>
+              <h4 className="font-medium mb-3">状态更新</h4>
+              <Space wrap>
+                {selectedRecord.status === 'dispatched' && (
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<CheckCircle size={14} />}
+                    onClick={() => handleUpdateDispatchStatus(selectedRecord, 'arrived')}
+                  >
+                    确认到达
+                  </Button>
+                )}
+                {selectedRecord.status === 'arrived' && (
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<Wrench size={14} />}
+                    onClick={() => handleUpdateDispatchStatus(selectedRecord, 'working')}
+                  >
+                    开始作业
+                  </Button>
+                )}
+                {(selectedRecord.status === 'working' || selectedRecord.status === 'arrived') && (
+                  <Button
+                    size="small"
+                    icon={<CheckCircle size={14} />}
+                    onClick={() => handleUpdateDispatchStatus(selectedRecord, 'completed')}
+                  >
+                    完成任务
+                  </Button>
+                )}
+                {selectedRecord.status !== 'completed' && selectedRecord.status !== 'cancelled' && (
+                  <Button
+                    size="small"
+                    danger
+                    icon={<XCircle size={14} />}
+                    onClick={() => handleUpdateDispatchStatus(selectedRecord, 'cancelled')}
+                  >
+                    取消调派
+                  </Button>
+                )}
+              </Space>
+            </div>
+
+            <div>
+              <h4 className="font-medium mb-3">时间线</h4>
+              <Timeline
+                items={[
+                  {
+                    color: 'blue',
+                    children: (
+                      <div>
+                        <p className="font-medium">调派指令下达</p>
+                        <p className="text-xs text-slate-500">
+                          {dayjs(selectedRecord.dispatchTime).format('YYYY-MM-DD HH:mm')}
+                        </p>
+                      </div>
+                    ),
+                  },
+                  ...(selectedRecord.arriveTime ? [{
+                    color: 'green',
+                    children: (
+                      <div>
+                        <p className="font-medium">队伍到达现场</p>
+                        <p className="text-xs text-slate-500">
+                          {dayjs(selectedRecord.arriveTime).format('YYYY-MM-DD HH:mm')}
+                        </p>
+                      </div>
+                    ),
+                  }] : []),
+                  ...(selectedRecord.completeTime ? [{
+                    color: 'success',
+                    children: (
+                      <div>
+                        <p className="font-medium">任务完成</p>
+                        <p className="text-xs text-slate-500">
+                          {dayjs(selectedRecord.completeTime).format('YYYY-MM-DD HH:mm')}
+                        </p>
+                      </div>
+                    ),
+                  }] : []),
+                ]}
+              />
+            </div>
+          </div>
+        )}
+      </Drawer>
 
       <Modal
         title="确认通知"

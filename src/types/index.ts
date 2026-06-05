@@ -3,6 +3,10 @@ export type EventType = 'disaster' | 'fault' | 'accident' | 'other';
 export type EventStatus = 'pending' | 'processing' | 'resolved' | 'closed';
 export type ResourceStatus = 'idle' | 'dispatched' | 'working' | 'rest';
 export type PlanStepStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
+export type DispatchStatus = 'pending' | 'dispatched' | 'arrived' | 'working' | 'completed' | 'cancelled';
+export type MaterialDispatchStatus = 'pending' | 'approved' | 'in_transit' | 'delivered' | 'cancelled';
+export type VideoMeetingStatus = 'not_started' | 'ongoing' | 'ended';
+export type PassengerSettleStatus = 'transferring' | 'settled' | 'departed';
 
 export interface Event {
   id: string;
@@ -115,22 +119,87 @@ export interface Notice {
   publisher?: string;
 }
 
-export interface Passenger安置 {
+export interface PassengerSettle {
   id: string;
   eventId: string;
   trainNo: string;
   passengerCount: number;
   transferCount: number;
- 安置Point: string;
-  status: 'transferring' | '安置d' | 'departed';
+  settlePoint: string;
+  status: PassengerSettleStatus;
   updateTime: string;
+}
+
+export interface DispatchRecord {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  teamId: string;
+  teamName: string;
+  dispatchTime: string;
+  arriveTime?: string;
+  completeTime?: string;
+  status: DispatchStatus;
+  taskDescription: string;
+  receiver?: string;
+  receiptContent?: string;
+  receiptTime?: string;
+  operator: string;
+}
+
+export interface MaterialDispatch {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  materialId: string;
+  materialName: string;
+  quantity: number;
+  unit: string;
+  fromWarehouse: string;
+  toLocation: string;
+  applyTime: string;
+  approveTime?: string;
+  deliverTime?: string;
+  status: MaterialDispatchStatus;
+  applicant: string;
+  approver?: string;
+  remark?: string;
+}
+
+export interface VideoMeeting {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  meetingNo: string;
+  title: string;
+  host: string;
+  participants: string[];
+  startTime: string;
+  endTime?: string;
+  status: VideoMeetingStatus;
+  meetingUrl?: string;
+}
+
+export interface ReplayReportResource {
+  type: string;
+  name: string;
+  count: number;
+  unit?: string;
 }
 
 export interface ReplayReport {
   id: string;
   eventId: string;
   eventTitle: string;
+  eventType?: EventType;
+  eventLevel?: EventLevel;
+  happenTime?: string;
+  closeTime?: string;
+  duration?: string;
   summary: string;
+  timeline: TimelineRecord[];
+  resources: ReplayReportResource[];
+  passengerSettles: PassengerSettle[];
   experience: string;
   lessons: string;
   suggestions: string;

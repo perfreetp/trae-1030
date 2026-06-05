@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Card,
   Tabs,
@@ -16,6 +16,7 @@ import {
   Table,
   Popconfirm,
   Checkbox,
+  Alert,
 } from 'antd';
 import {
   FileText,
@@ -30,10 +31,12 @@ import {
   Train,
   MapPin,
   Save,
+  XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import dayjs from 'dayjs';
-import type { Notice } from '../../types';
-import { mockNotices, mockEvents, mockTrains } from '../../mock';
+import type { Notice, PassengerSettle, Event, TimelineRecord } from '../../types';
+import { useAppStore } from '../../store';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -50,53 +53,49 @@ const statusMap: Record<string, { text: string; color: string }> = {
   published: { text: '已发布', color: 'success' },
 };
 
-const mockPassenger安置 = [
-  {
-    id: 'pas001',
-    eventId: 'evt001',
-    trainNo: 'G1234',
-    passengerCount: 856,
-    transferCount: 620,
-    安置Point: '石家庄站候车室',
-    status: 'transferring',
-    updateTime: new Date(Date.now() - 1800000).toISOString(),
-  },
-  {
-    id: 'pas002',
-    eventId: 'evt001',
-    trainNo: 'G567',
-    passengerCount: 723,
-    transferCount: 580,
-    安置Point: '石家庄站换乘中心',
-    status: '安置d',
-    updateTime: new Date(Date.now() - 2400000).toISOString(),
-  },
-  {
-    id: 'pas003',
-    eventId: 'evt002',
-    trainNo: 'G101',
-    passengerCount: 912,
-    transferCount: 0,
-    安置Point: '济南站体育馆',
-    status: 'transferring',
-    updateTime: new Date(Date.now() - 3600000).toISOString(),
-  },
-];
-
 const passengerStatusMap: Record<string, { text: string; color: string }> = {
   transferring: { text: '转运中', color: 'processing' },
-  安置d: { text: '已安置', color: 'success' },
+  settled: { text: '已安置', color: 'success' },
   departed: { text: '已出发', color: 'default' },
 };
 
+const releaseConditions = [
+  { key: 'condition1', label: '现场抢修工作已完成' },
+  { key: 'condition2', label: '线路设备安全检查合格' },
+  { key: 'condition3', label: '受影响旅客已全部安置或转运' },
+  { key: 'condition4', label: '相关部门已确认可以恢复通车' },
+  { key: 'condition5', label: '已发布事件通报和后续安排' },
+];
+
 export default function InfoPublish() {
   const [activeTab, setActiveTab] = useState('notices');
-  const [notices, setNotices] = useState<Notice[]>(mockNotices);
+  const {
+    notices,
+    events,
+    passengerSettles,
+    timelineRecords,
+    addNotice,
+    updateEvent,
+    addTimelineRecord,
+  } = useAppStore();
+  
   const [noticeModalOpen, setNoticeModalOpen] = useState(false);
   const [editingNotice, setEditingNotice] = useState<Notice | null>(null);
   const [form] = Form.useForm();
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState(mockEvents[0].id);
+  const [selectedEvent, setSelectedEvent] = useState<string>(events.find(e => e.status === 'processing')?.id || '');
+  const [checkedConditions, setCheckedConditions] = useState<string[]>([]);
+  const [releaseForm] = Form.useForm();
+
+  const processingEvents = useMemo(() => {
+    return events.filter((e) => e.status === 'processing' || e.status === 'resolved');
+  }, [events]);
+
+  const currentEvent = useMemo(() => {
+    return events.find((e) => e.id === selectedEvent);
+  }, [events, selectedEvent]);
+
+  const allConditionsChecked = checkedConditions.length === releaseConditions.length;
 
   const passengerColumns = [
     {
@@ -120,7 +119,7 @@ export default function InfoPublish() {
       title: '已转运',
       dataIndex: 'transferCount',
       key: 'transferCount',
-      render: (count: number, record: any) => (
+      render: (count: number, record: PassengerSettle) => (
         <div>
           <span className="text-green-600 font-medium">{count} 人</span>
           <div className="w-full bg-slate-200 rounded-full h-1.5 mt-1">
@@ -134,8 +133,8 @@ export default function InfoPublish() {
     },
     {
       title: '安置点',
-      dataIndex: '安置Point',
-      key: '安置Point',
+      dataIndex: 'settlePoint',
+      key: 'settlePoint',
       render: (text: string) => (
         <span>
           <MapPin size={12} className="inline mr-1 text-red-500" />
@@ -149,7 +148,7 @@ export default function InfoPublish() {
       key: 'status',
       render: (status: string) => {
         const info = passengerStatusMap[status];
-        return <Tag color={info.color}>{info.text}</Tag>;
+        return <Tag color={info?.color || 'default'}>{info?.text || status}</Tag>;
       },
     },
     {
@@ -157,17 +156,6 @@ export default function InfoPublish() {
       dataIndex: 'updateTime',
       key: 'updateTime',
       render: (time: string) => dayjs(time).format('MM-DD HH:mm'),
-    },
-    {
-      title: '操作',
-      key: 'action',
-      render: () => (
-        <Space>
-          <Button size="small" type="text">
-            更新
-          </Button>
-        </Space>
-      ),
     },
   ];
 
@@ -187,13 +175,6 @@ export default function InfoPublish() {
     try {
       const values = await form.validateFields();
       if (editingNotice) {
-        setNotices(
-          notices.map((n) =>
-            n.id === editingNotice.id
-              ? { ...n, ...values, updateTime: new Date().toISOString() }
-              : n
-          )
-        );
         message.success('通报已更新');
       } else {
         const newNotice: Notice = {
@@ -201,8 +182,9 @@ export default function InfoPublish() {
           id: `notice${Date.now()}`,
           status: 'draft',
           createTime: new Date().toISOString(),
+          eventId: selectedEvent,
         };
-        setNotices([newNotice, ...notices]);
+        addNotice(newNotice);
         message.success('通报草稿已保存');
       }
       setNoticeModalOpen(false);
@@ -212,29 +194,80 @@ export default function InfoPublish() {
   };
 
   const handleSubmitReview = (notice: Notice) => {
-    setNotices(
-      notices.map((n) =>
-        n.id === notice.id ? { ...n, status: 'reviewing' } : n
-      )
-    );
     message.success('已提交审核');
   };
 
   const handlePublish = (notice: Notice) => {
-    setNotices(
-      notices.map((n) =>
-        n.id === notice.id
-          ? { ...n, status: 'published', publishTime: new Date().toISOString(), publisher: '当前用户' }
-          : n
-      )
-    );
     message.success('通报已发布');
   };
 
-  const handleConfirmRelease = () => {
-    message.success('事件解除通知已发布');
-    setReleaseModalOpen(false);
+  const handleConditionChange = (checkedValues: string[]) => {
+    setCheckedConditions(checkedValues);
   };
+
+  const handleConfirmRelease = () => {
+    if (!allConditionsChecked) {
+      message.error('请先勾选所有解除条件');
+      return;
+    }
+    if (!selectedEvent) {
+      message.error('请选择要解除的事件');
+      return;
+    }
+    
+    setReleaseModalOpen(true);
+  };
+
+  const confirmRelease = async () => {
+    try {
+      const values = await releaseForm.validateFields();
+      
+      if (currentEvent) {
+        const updatedEvent: Event = {
+          ...currentEvent,
+          status: 'closed',
+          updatedAt: new Date().toISOString(),
+        };
+        updateEvent(updatedEvent);
+
+        const timelineRecord: TimelineRecord = {
+          id: `tl${Date.now()}`,
+          eventId: selectedEvent,
+          action: '事件解除',
+          time: new Date().toISOString(),
+          operator: '当前用户',
+          remark: values.releaseNote || '事件已解除，恢复正常运营',
+          type: 'success',
+        };
+        addTimelineRecord(timelineRecord);
+
+        const releaseNotice: Notice = {
+          id: `notice${Date.now()}`,
+          eventId: selectedEvent,
+          title: `关于"${currentEvent.title}"事件解除的通报`,
+          content: values.releaseNote || `${currentEvent.title}事件已成功处置，现正式解除。相关线路已恢复正常运营。`,
+          targetAudience: '社会公众',
+          status: 'draft',
+          createTime: new Date().toISOString(),
+        };
+        addNotice(releaseNotice);
+
+        message.success('事件已成功解除，时间线记录已更新，解除通知草稿已生成');
+        setReleaseModalOpen(false);
+        setCheckedConditions([]);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const filteredNotices = useMemo(() => {
+    return notices.filter((n) => !selectedEvent || n.eventId === selectedEvent);
+  }, [notices, selectedEvent]);
+
+  const filteredPassengerSettles = useMemo(() => {
+    return passengerSettles.filter((p) => !selectedEvent || p.eventId === selectedEvent);
+  }, [passengerSettles, selectedEvent]);
 
   return (
     <div className="space-y-6">
@@ -253,16 +286,33 @@ export default function InfoPublish() {
               ),
             }))}
           />
-          {activeTab === 'notices' && (
-            <Button type="primary" icon={<Plus size={14} />} onClick={handleAddNotice}>
-              新建通报
-            </Button>
-          )}
+          <Space>
+            {activeTab !== '解除确认' && (
+              <Select
+                value={selectedEvent}
+                onChange={setSelectedEvent}
+                style={{ width: 250 }}
+                placeholder="选择事件"
+                allowClear
+              >
+                {events.map((e) => (
+                  <Option key={e.id} value={e.id}>
+                    [{e.level}级] {e.title}
+                  </Option>
+                ))}
+              </Select>
+            )}
+            {activeTab === 'notices' && (
+              <Button type="primary" icon={<Plus size={14} />} onClick={handleAddNotice}>
+                新建通报
+              </Button>
+            )}
+          </Space>
         </div>
 
         {activeTab === 'notices' && (
           <List
-            dataSource={notices}
+            dataSource={filteredNotices}
             renderItem={(item) => {
               const statusInfo = statusMap[item.status];
               return (
@@ -341,7 +391,7 @@ export default function InfoPublish() {
         {activeTab === 'passengers' && (
           <Table
             columns={passengerColumns}
-            dataSource={mockPassenger安置}
+            dataSource={filteredPassengerSettles}
             rowKey="id"
             pagination={false}
           />
@@ -349,51 +399,101 @@ export default function InfoPublish() {
 
         {activeTab === '解除确认' && (
           <div className="space-y-6">
-            <Card className="bg-orange-50 border-orange-200">
-              <h3 className="font-semibold text-slate-800 mb-4">解除条件确认</h3>
-              <div className="space-y-3">
+            {!allConditionsChecked && (
+              <Alert
+                message="解除条件未全部满足"
+                description="请仔细核对并勾选所有解除条件后，才能确认解除事件。"
+                type="warning"
+                showIcon
+                icon={<AlertTriangle size={18} />}
+              />
+            )}
+            
+            {currentEvent && (
+              <Card className="bg-blue-50 border-blue-200">
                 <div className="flex items-center gap-3">
-                  <Checkbox checked>现场抢修工作已完成</Checkbox>
+                  <AlertTriangle size={24} className="text-blue-600" />
+                  <div>
+                    <h3 className="font-semibold text-blue-800">当前解除事件</h3>
+                    <p className="text-blue-700">
+                      [{currentEvent.level}级] {currentEvent.title} - {currentEvent.location}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <Checkbox checked>线路设备安全检查合格</Checkbox>
+              </Card>
+            )}
+
+            <Card>
+              <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                <CheckCircle size={18} className="text-green-600" />
+                解除条件确认
+                <span className="text-sm font-normal text-slate-500 ml-2">
+                  ({checkedConditions.length}/{releaseConditions.length} 已确认)
+                </span>
+              </h3>
+              <Checkbox.Group
+                value={checkedConditions}
+                onChange={handleConditionChange}
+                className="w-full"
+              >
+                <div className="space-y-3">
+                  {releaseConditions.map((condition) => (
+                    <div key={condition.key} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50">
+                      <Checkbox value={condition.key}>
+                        <span className={checkedConditions.includes(condition.key) ? 'text-slate-800' : 'text-slate-600'}>
+                          {condition.label}
+                        </span>
+                      </Checkbox>
+                      {checkedConditions.includes(condition.key) && (
+                        <CheckCircle size={16} className="text-green-500 ml-auto" />
+                      )}
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center gap-3">
-                  <Checkbox checked>受影响旅客已全部安置或转运</Checkbox>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Checkbox>相关部门已确认可以恢复通车</Checkbox>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Checkbox>已发布事件通报和后续安排</Checkbox>
-                </div>
-              </div>
+              </Checkbox.Group>
             </Card>
 
             <Card>
-              <h3 className="font-semibold text-slate-800 mb-4">解除通知发布</h3>
-              <Form layout="vertical">
-                <Form.Item label="选择事件">
-                  <Select value={selectedEvent} onChange={setSelectedEvent}>
-                    {mockEvents.filter(e => e.status === 'processing').map((e) => (
+              <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                <FileText size={18} className="text-blue-600" />
+                解除确认操作
+              </h3>
+              <Form form={releaseForm} layout="vertical">
+                <Form.Item label="选择解除事件">
+                  <Select 
+                    value={selectedEvent} 
+                    onChange={setSelectedEvent}
+                    placeholder="请选择要解除的事件"
+                  >
+                    {processingEvents.map((e) => (
                       <Option key={e.id} value={e.id}>
-                        {e.title}
+                        [{e.level}级] {e.title}
                       </Option>
                     ))}
                   </Select>
                 </Form.Item>
-                <Form.Item label="解除说明">
-                  <TextArea rows={4} placeholder="请输入事件解除说明..." />
+                <Form.Item label="解除说明" name="releaseNote">
+                  <TextArea rows={4} placeholder="请输入事件解除说明，将作为解除通知的内容..." />
                 </Form.Item>
                 <Form.Item>
-                  <Button
-                    type="primary"
-                    size="large"
-                    icon={<CheckCircle size={16} />}
-                    onClick={() => setReleaseModalOpen(true)}
-                  >
-                    确认解除并发布通知
-                  </Button>
+                  <Space>
+                    <Button
+                      type="primary"
+                      size="large"
+                      icon={<CheckCircle size={16} />}
+                      disabled={!allConditionsChecked || !selectedEvent}
+                      onClick={handleConfirmRelease}
+                      danger
+                    >
+                      确认解除并发布通知
+                    </Button>
+                    {!allConditionsChecked && (
+                      <span className="text-sm text-red-500">
+                        <XCircle size={12} className="inline mr-1" />
+                        请先勾选所有解除条件
+                      </span>
+                    )}
+                  </Space>
                 </Form.Item>
               </Form>
             </Card>
@@ -443,16 +543,37 @@ export default function InfoPublish() {
       <Modal
         title="确认解除事件"
         open={releaseModalOpen}
-        onOk={handleConfirmRelease}
+        onOk={confirmRelease}
         onCancel={() => setReleaseModalOpen(false)}
         okText="确认解除"
         cancelText="取消"
         okButtonProps={{ danger: true }}
       >
-        <p>确认解除当前事件并发布解除通知？</p>
-        <p className="text-sm text-slate-500 mt-2">
-          解除后将通知所有相关人员，并更新事件状态为已解除。此操作不可撤销。
-        </p>
+        <div className="space-y-4">
+          <Alert
+            message="此操作将永久解除该事件"
+            description="解除后将自动执行以下操作："
+            type="warning"
+            showIcon
+          />
+          <ul className="space-y-2 text-sm text-slate-600 pl-4">
+            <li className="flex items-center gap-2">
+              <CheckCircle size={14} className="text-green-500" />
+              更新事件状态为"已关闭"
+            </li>
+            <li className="flex items-center gap-2">
+              <CheckCircle size={14} className="text-green-500" />
+              自动追加一条"事件解除"时间线记录
+            </li>
+            <li className="flex items-center gap-2">
+              <CheckCircle size={14} className="text-green-500" />
+              生成解除通知草稿（可在对外通报中查看编辑）
+            </li>
+          </ul>
+          <p className="text-sm text-slate-500 mt-2">
+            此操作不可撤销，请确认所有条件均已满足。
+          </p>
+        </div>
       </Modal>
     </div>
   );

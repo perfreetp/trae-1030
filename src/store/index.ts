@@ -142,6 +142,7 @@ interface AppState {
   addTimelineRecord: (record: TimelineRecord) => void;
   addSitePhoto: (photo: SitePhoto) => void;
   addNotice: (notice: Notice) => void;
+  updateNotice: (notice: Notice) => void;
   addDispatchRecord: (record: DispatchRecord) => void;
   updateDispatchRecord: (record: DispatchRecord) => void;
   addMaterialDispatch: (dispatch: MaterialDispatch) => void;
@@ -193,6 +194,10 @@ export const useAppStore = create<AppState>((set) => ({
 
   addNotice: (notice) =>
     set((state) => ({ notices: [...state.notices, notice] })),
+  updateNotice: (notice) =>
+    set((state) => ({
+      notices: state.notices.map((n) => (n.id === notice.id ? notice : n)),
+    })),
 
   addDispatchRecord: (record) =>
     set((state) => ({ dispatchRecords: [...state.dispatchRecords, record] })),

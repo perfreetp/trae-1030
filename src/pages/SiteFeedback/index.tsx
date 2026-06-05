@@ -41,6 +41,8 @@ import {
   Copy as CopyIcon,
   Link as LinkIcon,
   Calendar,
+  Check,
+  ExternalLink,
 } from 'lucide-react';
 import type { UploadProps } from 'antd';
 import type { SitePhoto, VideoMeeting } from '../../types';
@@ -104,7 +106,7 @@ export default function SiteFeedback() {
   const [activeTab, setActiveTab] = useState('photos');
   const { sitePhotos, events, videoMeetings, addSitePhoto, addVideoMeeting } = useAppStore();
   
-  const [selectedEvent, setSelectedEvent] = useState(events[0]?.id || '');
+  const [selectedEvent, setSelectedEvent] = useState<string>('');
   const [photoCategory, setPhotoCategory] = useState<string | undefined>();
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<SitePhoto | null>(null);
@@ -114,6 +116,8 @@ export default function SiteFeedback() {
   const [selectedMeeting, setSelectedMeeting] = useState<VideoMeeting | null>(null);
   const [createMeetingModalOpen, setCreateMeetingModalOpen] = useState(false);
   const [createMeetingForm] = Form.useForm();
+  const [uploadedFileUrl, setUploadedFileUrl] = useState<string>('');
+  const [meetingEntryModalOpen, setMeetingEntryModalOpen] = useState(false);
 
   const filteredPhotos = useMemo(() => {
     return sitePhotos.filter((photo) => {
@@ -130,18 +134,32 @@ export default function SiteFeedback() {
     setPreviewVisible(true);
   };
 
+  const handleFileSelect = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setUploadedFileUrl(e.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+    return false;
+  };
+
   const handleUpload = () => {
     uploadForm.resetFields();
+    setUploadedFileUrl('');
     setUploadModalOpen(true);
   };
 
   const confirmUpload = async () => {
     try {
       const values = await uploadForm.validateFields();
+      if (!uploadedFileUrl) {
+        message.error('请先选择要上传的图片');
+        return;
+      }
       const newPhoto: SitePhoto = {
         id: `photo${Date.now()}`,
-        eventId: selectedEvent,
-        url: `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(values.title)}&image_size=square_hd`,
+        eventId: selectedEvent || events[0]?.id || '',
+        url: uploadedFileUrl,
         title: values.title,
         uploadTime: new Date().toISOString(),
         uploader: '当前用户',
@@ -182,6 +200,9 @@ export default function SiteFeedback() {
       const values = await createMeetingForm.validateFields();
       const event = events.find((e) => e.id === values.eventId);
       
+      const startTimeStr = values.startTime;
+      const startTime = startTimeStr ? new Date(startTimeStr).toISOString() : new Date().toISOString();
+      
       const newMeeting: VideoMeeting = {
         id: `meet${Date.now()}`,
         eventId: values.eventId,
@@ -190,17 +211,22 @@ export default function SiteFeedback() {
         title: values.title,
         host: '当前用户',
         participants: values.participants || [],
-        startTime: values.startTime ? values.startTime.toISOString() : new Date().toISOString(),
+        startTime,
         status: 'not_started',
-        meetingUrl: `https://meeting.example.com/${Date.now()}`,
+        meetingUrl: `https://meeting.example.com/join/${Date.now()}`,
       };
 
       addVideoMeeting(newMeeting);
-      message.success('视频会商已创建');
+      message.success('视频会商已创建成功');
       setCreateMeetingModalOpen(false);
     } catch (error) {
       console.error(error);
+      message.error('创建会议失败，请重试');
     }
+  };
+
+  const handleEnterMeeting = () => {
+    setMeetingEntryModalOpen(true);
   };
 
   const filteredMeetings = useMemo(() => {
@@ -212,7 +238,9 @@ export default function SiteFeedback() {
     multiple: true,
     listType: 'picture-card',
     showUploadList: false,
-    beforeUpload: () => {
+    accept: 'image/*',
+    beforeUpload: (file) => {
+      handleFileSelect(file);
       handleUpload();
       return false;
     },
@@ -532,11 +560,34 @@ export default function SiteFeedback() {
           <Form.Item label="拍摄位置" name="location">
             <Input placeholder="请输入拍摄位置，如：京广线K1234+500" />
           </Form.Item>
-          <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center bg-slate-50">
-            <UploadCloud size={48} className="mx-auto text-slate-400 mb-3" />
-            <p className="text-slate-600 mb-1">点击或拖拽上传图片</p>
-            <p className="text-xs text-slate-400">支持 JPG、PNG 格式，单张不超过 10MB</p>
-          </div>
+          {uploadedFileUrl ? (
+            <div className="border-2 border-blue-300 rounded-lg p-4 text-center bg-blue-50">
+              <img
+                src={uploadedFileUrl}
+                alt="预览"
+                className="max-h-48 mx-auto rounded-lg mb-2"
+              />
+              <p className="text-sm text-green-600 flex items-center justify-center gap-1">
+                <Check size={14} />
+                已选择图片，点击确认上传
+              </p>
+            </div>
+          ) : (
+            <Upload
+              accept="image/*"
+              showUploadList={false}
+              beforeUpload={(file) => {
+                handleFileSelect(file);
+                return false;
+              }}
+            >
+              <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center bg-slate-50 cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                <UploadCloud size={48} className="mx-auto text-slate-400 mb-3" />
+                <p className="text-slate-600 mb-1">点击选择图片</p>
+                <p className="text-xs text-slate-400">支持 JPG、PNG 格式，单张不超过 10MB</p>
+              </div>
+            </Upload>
+          )}
         </Form>
       </Modal>
 
@@ -606,11 +657,11 @@ export default function SiteFeedback() {
 
             <div className="space-y-3">
               <h4 className="font-medium">会议操作</h4>
-              <Button type="primary" block icon={<Video size={16} />}>
+              <Button type="primary" block icon={<Video size={16} />} onClick={handleEnterMeeting}>
                 进入会议
               </Button>
-              <Button block icon={<LinkIcon size={16} />}>
-                分享会议链接
+              <Button block icon={<LinkIcon size={16} />} onClick={() => selectedMeeting?.meetingUrl && handleCopyMeetingUrl(selectedMeeting.meetingUrl)}>
+                复制会议链接
               </Button>
             </div>
           </div>
@@ -666,6 +717,82 @@ export default function SiteFeedback() {
             </Select>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="进入视频会议"
+        open={meetingEntryModalOpen}
+        onCancel={() => setMeetingEntryModalOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setMeetingEntryModalOpen(false)}>
+            关闭
+          </Button>,
+          <Button
+            key="enter"
+            type="primary"
+            icon={<ExternalLink size={14} />}
+            onClick={() => {
+              if (selectedMeeting?.meetingUrl) {
+                window.open(selectedMeeting.meetingUrl, '_blank');
+                message.success('正在打开会议页面...');
+              }
+            }}
+          >
+            打开会议页面
+          </Button>,
+        ]}
+        width={500}
+      >
+        {selectedMeeting && (
+          <div className="space-y-4">
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-xl">
+              <h3 className="text-xl font-bold mb-2">{selectedMeeting.title}</h3>
+              <div className="flex items-center gap-2">
+                <Badge
+                  status={selectedMeeting.status === 'ongoing' ? 'processing' : 'default'}
+                  text={videoStatusTextMap[selectedMeeting.status]}
+                />
+              </div>
+            </div>
+            <Descriptions column={1} bordered size="small">
+              <Descriptions.Item label="会议号">
+                <Space>
+                  <span className="font-mono font-semibold">{selectedMeeting.meetingNo}</span>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CopyIcon size={14} />}
+                    onClick={() => handleCopyMeetingNo(selectedMeeting.meetingNo)}
+                  >
+                    复制
+                  </Button>
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="主持人">{selectedMeeting.host}</Descriptions.Item>
+              <Descriptions.Item label="会议链接">
+                <Space>
+                  <span className="text-blue-600 text-sm truncate max-w-[250px]">
+                    {selectedMeeting.meetingUrl}
+                  </span>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CopyIcon size={14} />}
+                    onClick={() => selectedMeeting.meetingUrl && handleCopyMeetingUrl(selectedMeeting.meetingUrl)}
+                  >
+                    复制
+                  </Button>
+                </Space>
+              </Descriptions.Item>
+            </Descriptions>
+            <div className="bg-slate-50 p-4 rounded-lg">
+              <p className="text-sm text-slate-600 mb-2">
+                <Info size={14} className="inline mr-1" />
+                提示：点击下方按钮将在新窗口打开会议页面，或复制会议链接在浏览器中打开。
+              </p>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

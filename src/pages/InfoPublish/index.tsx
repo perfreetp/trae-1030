@@ -75,6 +75,7 @@ export default function InfoPublish() {
     passengerSettles,
     timelineRecords,
     addNotice,
+    updateNotice,
     updateEvent,
     addTimelineRecord,
   } = useAppStore();
@@ -175,6 +176,11 @@ export default function InfoPublish() {
     try {
       const values = await form.validateFields();
       if (editingNotice) {
+        const updatedNotice: Notice = {
+          ...editingNotice,
+          ...values,
+        };
+        updateNotice(updatedNotice);
         message.success('通报已更新');
       } else {
         const newNotice: Notice = {
@@ -194,10 +200,22 @@ export default function InfoPublish() {
   };
 
   const handleSubmitReview = (notice: Notice) => {
+    const updatedNotice: Notice = {
+      ...notice,
+      status: 'reviewing',
+    };
+    updateNotice(updatedNotice);
     message.success('已提交审核');
   };
 
   const handlePublish = (notice: Notice) => {
+    const updatedNotice: Notice = {
+      ...notice,
+      status: 'published',
+      publishTime: new Date().toISOString(),
+      publisher: '当前用户',
+    };
+    updateNotice(updatedNotice);
     message.success('通报已发布');
   };
 

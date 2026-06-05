@@ -94,11 +94,13 @@ const tabItems = [
   { key: 'teams', label: '救援队伍', icon: <Users size={16} /> },
   { key: 'materials', label: '应急物资', icon: <Package size={16} /> },
   { key: 'duty', label: '值班人员', icon: <Bell size={16} /> },
-  { key: 'records', label: '调派记录', icon: <FileText size={16} /> },
+  { key: 'records', label: '队伍调派', icon: <FileText size={16} /> },
+  { key: 'materialRecords', label: '物资调拨', icon: <Truck size={16} /> },
 ];
 
 export default function ResourceDispatch() {
   const [activeTab, setActiveTab] = useState('teams');
+  const [selectedEventId, setSelectedEventId] = useState<string>('');
   const {
     resourceTeams,
     materials,
@@ -160,6 +162,16 @@ export default function ResourceDispatch() {
 
   const categories = [...new Set(materials.map((m) => m.category))];
   const warehouses = [...new Set(materials.map((m) => m.warehouse))];
+
+  const filteredDispatchRecords = useMemo(() => {
+    if (!selectedEventId) return dispatchRecords;
+    return dispatchRecords.filter((r) => r.eventId === selectedEventId);
+  }, [dispatchRecords, selectedEventId]);
+
+  const filteredMaterialDispatches = useMemo(() => {
+    if (!selectedEventId) return materialDispatches;
+    return materialDispatches.filter((r) => r.eventId === selectedEventId);
+  }, [materialDispatches, selectedEventId]);
 
   const handleDispatch = (team: ResourceTeam) => {
     setSelectedTeam(team);
@@ -257,10 +269,12 @@ export default function ResourceDispatch() {
       ...(newStatus === 'completed' && { completeTime: new Date().toISOString() }),
     };
     updateDispatchRecord(updated);
+    setSelectedRecord(updated);
 
-    if (selectedTeam) {
+    const team = resourceTeams.find((t) => t.id === record.teamId);
+    if (team) {
       const teamStatus = newStatus === 'working' ? 'working' : newStatus === 'completed' ? 'idle' : 'dispatched';
-      updateResourceTeam({ ...selectedTeam, status: teamStatus as any });
+      updateResourceTeam({ ...team, status: teamStatus as any, currentTask: newStatus === 'completed' ? undefined : team.currentTask });
     }
 
     message.success(`状态已更新为: ${dispatchStatusTextMap[newStatus]}`);
@@ -475,9 +489,85 @@ export default function ResourceDispatch() {
     },
   ];
 
+  const materialDispatchColumns = [
+    {
+      title: '申请时间',
+      dataIndex: 'applyTime',
+      key: 'applyTime',
+      render: (time: string) => dayjs(time).format('MM-DD HH:mm'),
+    },
+    {
+      title: '物资名称',
+      dataIndex: 'materialName',
+      key: 'materialName',
+      render: (text: string, record: MaterialDispatch) => (
+        <div>
+          <div className="font-medium">{text}</div>
+          <div className="text-xs text-slate-400">
+            数量: {record.quantity} {record.unit}
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: '调出仓库',
+      dataIndex: 'fromWarehouse',
+      key: 'fromWarehouse',
+    },
+    {
+      title: '运往地点',
+      dataIndex: 'toLocation',
+      key: 'toLocation',
+    },
+    {
+      title: '关联事件',
+      dataIndex: 'eventTitle',
+      key: 'eventTitle',
+      render: (text: string) => (
+        <span className="text-sm">{text}</span>
+      ),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: string) => {
+        const info = materialDispatchStatusMap[status];
+        return <Tag color={info.color}>{info.text}</Tag>;
+      },
+    },
+    {
+      title: '申请人',
+      dataIndex: 'applicant',
+      key: 'applicant',
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <Card className="!rounded-xl">
+        <div className="bg-slate-50 rounded-lg p-3 mb-4">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-600 font-medium">选择事件：</span>
+            <Select
+              placeholder="全部事件"
+              style={{ width: 300 }}
+              allowClear
+              value={selectedEventId || undefined}
+              onChange={setSelectedEventId}
+            >
+              {events.map((e) => (
+                <Option key={e.id} value={e.id}>
+                  [{e.level}级] {e.title}
+                </Option>
+              ))}
+            </Select>
+            <span className="text-xs text-slate-400">
+              选择事件后，调派记录和物资调拨将仅显示该事件相关数据
+            </span>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between mb-4">
           <Tabs
             activeKey={activeTab}
@@ -635,7 +725,16 @@ export default function ResourceDispatch() {
         {activeTab === 'records' && (
           <Table
             columns={dispatchRecordColumns}
-            dataSource={dispatchRecords}
+            dataSource={filteredDispatchRecords}
+            rowKey="id"
+            pagination={{ pageSize: 10 }}
+          />
+        )}
+
+        {activeTab === 'materialRecords' && (
+          <Table
+            columns={materialDispatchColumns}
+            dataSource={filteredMaterialDispatches}
             rowKey="id"
             pagination={{ pageSize: 10 }}
           />
@@ -750,121 +849,128 @@ export default function ResourceDispatch() {
         open={recordDrawerOpen}
         onClose={() => setRecordDrawerOpen(false)}
       >
-        {selectedRecord && (
-          <div className="space-y-6">
-            <Descriptions column={1} bordered size="small">
-              <Descriptions.Item label="调派时间">
-                {dayjs(selectedRecord.dispatchTime).format('YYYY-MM-DD HH:mm:ss')}
-              </Descriptions.Item>
-              <Descriptions.Item label="救援队伍">
-                {selectedRecord.teamName}
-              </Descriptions.Item>
-              <Descriptions.Item label="目标事件">
-                {selectedRecord.eventTitle}
-              </Descriptions.Item>
-              <Descriptions.Item label="当前状态">
-                <Tag color={dispatchStatusColorMap[selectedRecord.status]}>
-                  {dispatchStatusTextMap[selectedRecord.status]}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="任务描述">
-                {selectedRecord.taskDescription}
-              </Descriptions.Item>
-              <Descriptions.Item label="回执内容">
-                {selectedRecord.receiptContent || '待回执'}
-              </Descriptions.Item>
-              <Descriptions.Item label="操作人">
-                {selectedRecord.operator}
-              </Descriptions.Item>
-            </Descriptions>
+        {(() => {
+          const currentRecord = selectedRecord
+            ? dispatchRecords.find((r) => r.id === selectedRecord.id) || selectedRecord
+            : null;
+          if (!currentRecord) return null;
 
-            <div>
-              <h4 className="font-medium mb-3">状态更新</h4>
-              <Space wrap>
-                {selectedRecord.status === 'dispatched' && (
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<CheckCircle size={14} />}
-                    onClick={() => handleUpdateDispatchStatus(selectedRecord, 'arrived')}
-                  >
-                    确认到达
-                  </Button>
-                )}
-                {selectedRecord.status === 'arrived' && (
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<Wrench size={14} />}
-                    onClick={() => handleUpdateDispatchStatus(selectedRecord, 'working')}
-                  >
-                    开始作业
-                  </Button>
-                )}
-                {(selectedRecord.status === 'working' || selectedRecord.status === 'arrived') && (
-                  <Button
-                    size="small"
-                    icon={<CheckCircle size={14} />}
-                    onClick={() => handleUpdateDispatchStatus(selectedRecord, 'completed')}
-                  >
-                    完成任务
-                  </Button>
-                )}
-                {selectedRecord.status !== 'completed' && selectedRecord.status !== 'cancelled' && (
-                  <Button
-                    size="small"
-                    danger
-                    icon={<XCircle size={14} />}
-                    onClick={() => handleUpdateDispatchStatus(selectedRecord, 'cancelled')}
-                  >
-                    取消调派
-                  </Button>
-                )}
-              </Space>
-            </div>
+          return (
+            <div className="space-y-6">
+              <Descriptions column={1} bordered size="small">
+                <Descriptions.Item label="调派时间">
+                  {dayjs(currentRecord.dispatchTime).format('YYYY-MM-DD HH:mm:ss')}
+                </Descriptions.Item>
+                <Descriptions.Item label="救援队伍">
+                  {currentRecord.teamName}
+                </Descriptions.Item>
+                <Descriptions.Item label="目标事件">
+                  {currentRecord.eventTitle}
+                </Descriptions.Item>
+                <Descriptions.Item label="当前状态">
+                  <Tag color={dispatchStatusColorMap[currentRecord.status]}>
+                    {dispatchStatusTextMap[currentRecord.status]}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="任务描述">
+                  {currentRecord.taskDescription}
+                </Descriptions.Item>
+                <Descriptions.Item label="回执内容">
+                  {currentRecord.receiptContent || '待回执'}
+                </Descriptions.Item>
+                <Descriptions.Item label="操作人">
+                  {currentRecord.operator}
+                </Descriptions.Item>
+              </Descriptions>
 
-            <div>
-              <h4 className="font-medium mb-3">时间线</h4>
-              <Timeline
-                items={[
-                  {
-                    color: 'blue',
-                    children: (
-                      <div>
-                        <p className="font-medium">调派指令下达</p>
-                        <p className="text-xs text-slate-500">
-                          {dayjs(selectedRecord.dispatchTime).format('YYYY-MM-DD HH:mm')}
-                        </p>
-                      </div>
-                    ),
-                  },
-                  ...(selectedRecord.arriveTime ? [{
-                    color: 'green',
-                    children: (
-                      <div>
-                        <p className="font-medium">队伍到达现场</p>
-                        <p className="text-xs text-slate-500">
-                          {dayjs(selectedRecord.arriveTime).format('YYYY-MM-DD HH:mm')}
-                        </p>
-                      </div>
-                    ),
-                  }] : []),
-                  ...(selectedRecord.completeTime ? [{
-                    color: 'success',
-                    children: (
-                      <div>
-                        <p className="font-medium">任务完成</p>
-                        <p className="text-xs text-slate-500">
-                          {dayjs(selectedRecord.completeTime).format('YYYY-MM-DD HH:mm')}
-                        </p>
-                      </div>
-                    ),
-                  }] : []),
-                ]}
-              />
+              <div>
+                <h4 className="font-medium mb-3">状态更新</h4>
+                <Space wrap>
+                  {currentRecord.status === 'dispatched' && (
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<CheckCircle size={14} />}
+                      onClick={() => handleUpdateDispatchStatus(currentRecord, 'arrived')}
+                    >
+                      确认到达
+                    </Button>
+                  )}
+                  {currentRecord.status === 'arrived' && (
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<Wrench size={14} />}
+                      onClick={() => handleUpdateDispatchStatus(currentRecord, 'working')}
+                    >
+                      开始作业
+                    </Button>
+                  )}
+                  {(currentRecord.status === 'working' || currentRecord.status === 'arrived') && (
+                    <Button
+                      size="small"
+                      icon={<CheckCircle size={14} />}
+                      onClick={() => handleUpdateDispatchStatus(currentRecord, 'completed')}
+                    >
+                      完成任务
+                    </Button>
+                  )}
+                  {currentRecord.status !== 'completed' && currentRecord.status !== 'cancelled' && (
+                    <Button
+                      size="small"
+                      danger
+                      icon={<XCircle size={14} />}
+                      onClick={() => handleUpdateDispatchStatus(currentRecord, 'cancelled')}
+                    >
+                      取消调派
+                    </Button>
+                  )}
+                </Space>
+              </div>
+
+              <div>
+                <h4 className="font-medium mb-3">时间线</h4>
+                <Timeline
+                  items={[
+                    {
+                      color: 'blue',
+                      children: (
+                        <div>
+                          <p className="font-medium">调派指令下达</p>
+                          <p className="text-xs text-slate-500">
+                            {dayjs(currentRecord.dispatchTime).format('YYYY-MM-DD HH:mm')}
+                          </p>
+                        </div>
+                      ),
+                    },
+                    ...(currentRecord.arriveTime ? [{
+                      color: 'green',
+                      children: (
+                        <div>
+                          <p className="font-medium">队伍到达现场</p>
+                          <p className="text-xs text-slate-500">
+                            {dayjs(currentRecord.arriveTime).format('YYYY-MM-DD HH:mm')}
+                          </p>
+                        </div>
+                      ),
+                    }] : []),
+                    ...(currentRecord.completeTime ? [{
+                      color: 'success',
+                      children: (
+                        <div>
+                          <p className="font-medium">任务完成</p>
+                          <p className="text-xs text-slate-500">
+                            {dayjs(currentRecord.completeTime).format('YYYY-MM-DD HH:mm')}
+                          </p>
+                        </div>
+                      ),
+                    }] : []),
+                  ]}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </Drawer>
 
       <Modal

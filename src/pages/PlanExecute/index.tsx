@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Card,
   Select,
@@ -27,7 +27,8 @@ import {
 } from 'lucide-react';
 import dayjs from 'dayjs';
 import type { EmergencyPlan, PlanStepStatus, CommandReceipt } from '../../types';
-import { mockEmergencyPlans, mockTimelineRecords, mockCommandReceipts, mockEvents } from '../../mock';
+import { mockEmergencyPlans, mockCommandReceipts } from '../../mock';
+import { useAppStore } from '../../store';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -46,15 +47,28 @@ const typeColorMap: Record<string, string> = {
   error: '#F53F3F',
 };
 
+const eventStatusTextMap: Record<string, string> = {
+  pending: '待处理',
+  processing: '处理中',
+  resolved: '已解决',
+  closed: '已关闭',
+};
+
 export default function PlanExecute() {
-  const [selectedEvent, setSelectedEvent] = useState<string>(mockEvents[0].id);
+  const { events, timelineRecords } = useAppStore();
+  const [selectedEvent, setSelectedEvent] = useState<string>(events[0]?.id || '');
   const [selectedPlan, setSelectedPlan] = useState<EmergencyPlan>(mockEmergencyPlans[0]);
   const [steps, setSteps] = useState(selectedPlan.steps);
   const [commandModalOpen, setCommandModalOpen] = useState(false);
   const [commandForm, setCommandForm] = useState({ command: '', receiver: '' });
   const [receipts] = useState<CommandReceipt[]>(mockCommandReceipts);
 
-  const currentEvent = mockEvents.find((e) => e.id === selectedEvent);
+  const currentEvent = events.find((e) => e.id === selectedEvent);
+
+  const eventTimeline = useMemo(() => {
+    if (!selectedEvent) return timelineRecords;
+    return timelineRecords.filter((t) => t.eventId === selectedEvent);
+  }, [timelineRecords, selectedEvent]);
 
   const handlePlanChange = (planId: string) => {
     const plan = mockEmergencyPlans.find((p) => p.id === planId);
@@ -116,8 +130,10 @@ export default function PlanExecute() {
             onChange={setSelectedEvent}
             className="w-full mb-4"
             size="large"
+            showSearch
+            optionFilterProp="children"
           >
-            {mockEvents.map((e) => (
+            {events.map((e) => (
               <Option key={e.id} value={e.id}>
                 {e.title}
               </Option>
@@ -126,11 +142,21 @@ export default function PlanExecute() {
 
           {currentEvent && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Tag color={currentEvent.level === 'Ⅰ' || currentEvent.level === 'Ⅱ' ? 'red' : 'orange'}>
                   {currentEvent.level}级
                 </Tag>
-                <Tag color="processing">处理中</Tag>
+                <Tag
+                  color={
+                    currentEvent.status === 'closed'
+                      ? 'default'
+                      : currentEvent.status === 'resolved'
+                      ? 'success'
+                      : 'processing'
+                  }
+                >
+                  {eventStatusTextMap[currentEvent.status]}
+                </Tag>
               </div>
               <p className="text-sm text-slate-600">{currentEvent.description}</p>
               <div className="text-xs text-slate-400">
@@ -298,7 +324,7 @@ export default function PlanExecute() {
             }
           >
             <Timeline
-              items={mockTimelineRecords.slice(0, 6).map((record) => ({
+              items={eventTimeline.slice(0, 8).map((record) => ({
                 color: typeColorMap[record.type],
                 children: (
                   <div className="pb-2">

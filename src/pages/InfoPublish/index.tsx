@@ -287,6 +287,13 @@ export default function InfoPublish() {
     return passengerSettles.filter((p) => !selectedEvent || p.eventId === selectedEvent);
   }, [passengerSettles, selectedEvent]);
 
+  const filteredReleaseRecords = useMemo(() => {
+    return timelineRecords.filter(
+      (t) =>
+        t.action === '事件解除' && (!selectedEvent || t.eventId === selectedEvent)
+    );
+  }, [timelineRecords, selectedEvent]);
+
   return (
     <div className="space-y-6">
       <Card className="!rounded-xl">
@@ -305,21 +312,21 @@ export default function InfoPublish() {
             }))}
           />
           <Space>
-            {activeTab !== '解除确认' && (
-              <Select
-                value={selectedEvent}
-                onChange={setSelectedEvent}
-                style={{ width: 250 }}
-                placeholder="选择事件"
-                allowClear
-              >
-                {events.map((e) => (
-                  <Option key={e.id} value={e.id}>
-                    [{e.level}级] {e.title}
-                  </Option>
-                ))}
-              </Select>
-            )}
+            <Select
+              value={selectedEvent}
+              onChange={setSelectedEvent}
+              style={{ width: 250 }}
+              placeholder="选择事件"
+              allowClear
+              showSearch
+              optionFilterProp="children"
+            >
+              {events.map((e) => (
+                <Option key={e.id} value={e.id}>
+                  [{e.level}级] {e.title}
+                </Option>
+              ))}
+            </Select>
             {activeTab === 'notices' && (
               <Button type="primary" icon={<Plus size={14} />} onClick={handleAddNotice}>
                 新建通报
@@ -436,6 +443,9 @@ export default function InfoPublish() {
                     <p className="text-blue-700">
                       [{currentEvent.level}级] {currentEvent.title} - {currentEvent.location}
                     </p>
+                    <Tag color={currentEvent.status === 'closed' ? 'default' : 'processing'} className="mt-1">
+                      {currentEvent.status === 'closed' ? '已关闭' : currentEvent.status === 'resolved' ? '已解决' : '处理中'}
+                    </Tag>
                   </div>
                 </div>
               </Card>
@@ -514,6 +524,70 @@ export default function InfoPublish() {
                   </Space>
                 </Form.Item>
               </Form>
+            </Card>
+
+            <Card
+              title={
+                <div className="flex items-center gap-2">
+                  <Clock size={16} className="text-blue-600" />
+                  <span>解除记录</span>
+                  {selectedEvent && (
+                    <Tag color="blue" className="ml-2">已筛选</Tag>
+                  )}
+                </div>
+              }
+            >
+              {filteredReleaseRecords.length > 0 ? (
+                <List
+                  dataSource={filteredReleaseRecords}
+                  renderItem={(item) => {
+                    const event = events.find((e) => e.id === item.eventId);
+                    return (
+                      <List.Item className="!px-4 !py-4 bg-green-50 rounded-xl mb-3">
+                        <List.Item.Meta
+                          avatar={
+                            <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                              <CheckCircle size={24} className="text-green-600" />
+                            </div>
+                          }
+                          title={
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold">{item.action}</span>
+                              <Tag color="green">已完成</Tag>
+                            </div>
+                          }
+                          description={
+                            <div className="space-y-2">
+                              <p className="text-sm text-slate-600">{item.remark}</p>
+                              <div className="text-xs text-slate-400 flex items-center gap-4 flex-wrap">
+                                <span>
+                                  <User size={12} className="inline mr-1" />
+                                  操作人: {item.operator}
+                                </span>
+                                <span>
+                                  <Clock size={12} className="inline mr-1" />
+                                  解除时间: {dayjs(item.time).format('YYYY-MM-DD HH:mm')}
+                                </span>
+                                {event && (
+                                  <span>
+                                    <FileText size={12} className="inline mr-1" />
+                                    关联事件: [{event.level}级] {event.title}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          }
+                        />
+                      </List.Item>
+                    );
+                  }}
+                />
+              ) : (
+                <div className="text-center py-8 text-slate-400">
+                  <CheckCircle size={48} className="mx-auto mb-3 opacity-30" />
+                  <p>暂无解除记录</p>
+                </div>
+              )}
             </Card>
           </div>
         )}

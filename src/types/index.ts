@@ -138,6 +138,7 @@ export interface DispatchRecord {
   teamName: string;
   dispatchTime: string;
   arriveTime?: string;
+  workingTime?: string;
   completeTime?: string;
   status: DispatchStatus;
   taskDescription: string;

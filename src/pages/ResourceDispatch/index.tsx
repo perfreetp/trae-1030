@@ -176,6 +176,9 @@ export default function ResourceDispatch() {
   const handleDispatch = (team: ResourceTeam) => {
     setSelectedTeam(team);
     dispatchForm.resetFields();
+    if (selectedEventId) {
+      dispatchForm.setFieldsValue({ eventId: selectedEventId });
+    }
     setDispatchModalOpen(true);
   };
 
@@ -205,8 +208,9 @@ export default function ResourceDispatch() {
       };
       updateResourceTeam(updatedTeam);
 
-      message.success(`已成功调派 ${selectedTeam!.name}`);
+      message.success(`已成功调派 ${selectedTeam!.name}，请在"队伍调派"页签查看`);
       setDispatchModalOpen(false);
+      setActiveTab('records');
     } catch (error) {
       console.error(error);
     }
@@ -215,6 +219,9 @@ export default function ResourceDispatch() {
   const handleMaterialDispatch = (material: Material) => {
     setSelectedMaterial(material);
     materialDispatchForm.resetFields();
+    if (selectedEventId) {
+      materialDispatchForm.setFieldsValue({ eventId: selectedEventId });
+    }
     setMaterialDispatchModalOpen(true);
   };
 
@@ -249,8 +256,9 @@ export default function ResourceDispatch() {
       };
       updateMaterial(updatedMaterial);
 
-      message.success(`已申请调拨 ${values.quantity} ${selectedMaterial!.unit} ${selectedMaterial!.name}`);
+      message.success(`已申请调拨 ${values.quantity} ${selectedMaterial!.unit} ${selectedMaterial!.name}，请在"物资调拨"页签查看`);
       setMaterialDispatchModalOpen(false);
+      setActiveTab('materialRecords');
     } catch (error) {
       console.error(error);
     }
@@ -266,6 +274,7 @@ export default function ResourceDispatch() {
       ...record,
       status: newStatus as any,
       ...(newStatus === 'arrived' && { arriveTime: new Date().toISOString() }),
+      ...(newStatus === 'working' && { workingTime: new Date().toISOString() }),
       ...(newStatus === 'completed' && { completeTime: new Date().toISOString() }),
     };
     updateDispatchRecord(updated);
@@ -950,6 +959,17 @@ export default function ResourceDispatch() {
                           <p className="font-medium">队伍到达现场</p>
                           <p className="text-xs text-slate-500">
                             {dayjs(currentRecord.arriveTime).format('YYYY-MM-DD HH:mm')}
+                          </p>
+                        </div>
+                      ),
+                    }] : []),
+                    ...(currentRecord.workingTime ? [{
+                      color: 'orange',
+                      children: (
+                        <div>
+                          <p className="font-medium">开始作业</p>
+                          <p className="text-xs text-slate-500">
+                            {dayjs(currentRecord.workingTime).format('YYYY-MM-DD HH:mm')}
                           </p>
                         </div>
                       ),

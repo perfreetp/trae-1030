@@ -37,6 +37,7 @@ const mockDispatchRecords: DispatchRecord[] = [
     teamName: '石家庄工务段救援队',
     dispatchTime: new Date(now.getTime() - 3550000).toISOString(),
     arriveTime: new Date(now.getTime() - 3200000).toISOString(),
+    workingTime: new Date(now.getTime() - 3100000).toISOString(),
     status: 'working',
     taskDescription: '赶赴京广线K1234+500处进行线路抢修作业',
     receiver: '王队长',
@@ -119,6 +120,44 @@ const mockPassengerSettles: PassengerSettle[] = [
   },
 ];
 
+const STORAGE_KEY = 'railway-emergency-store-v4';
+
+function loadState(): any {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.warn('Failed to load state:', e);
+  }
+  return null;
+}
+
+function saveState(state: any): void {
+  try {
+    const toSave = {
+      events: state.events,
+      resourceTeams: state.resourceTeams,
+      materials: state.materials,
+      timelineRecords: state.timelineRecords,
+      sitePhotos: state.sitePhotos,
+      notices: state.notices,
+      dispatchRecords: state.dispatchRecords,
+      materialDispatches: state.materialDispatches,
+      videoMeetings: state.videoMeetings,
+      passengerSettles: state.passengerSettles,
+      replayReports: state.replayReports,
+      drillRecords: state.drillRecords,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  } catch (e) {
+    console.warn('Failed to save state:', e);
+  }
+}
+
+const storedData = loadState();
+
 interface AppState {
   events: Event[];
   resourceTeams: ResourceTeam[];
@@ -153,78 +192,149 @@ interface AppState {
   updateDrillRecord: (record: DrillRecord) => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
-  events: mockEvents,
-  resourceTeams: mockResourceTeams,
-  materials: mockMaterials,
-  timelineRecords: mockTimelineRecords,
-  sitePhotos: mockSitePhotos,
-  notices: mockNotices,
-  dispatchRecords: mockDispatchRecords,
-  materialDispatches: mockMaterialDispatches,
-  videoMeetings: mockVideoMeetings,
-  passengerSettles: mockPassengerSettles,
-  replayReports: mockReplayReports,
-  drillRecords: mockDrillRecords,
+export const useAppStore = create<AppState>(function (set, get) {
+  function persistSet(partial: any): void {
+    set(partial);
+    saveState(get());
+  }
 
-  setEvents: (events) => set({ events }),
-  addEvent: (event) => set((state) => ({ events: [...state.events, event] })),
-  updateEvent: (event) =>
-    set((state) => ({
-      events: state.events.map((e) => (e.id === event.id ? event : e)),
-    })),
+  const initialEvents = storedData?.events || mockEvents;
+  const initialResourceTeams = storedData?.resourceTeams || mockResourceTeams;
+  const initialMaterials = storedData?.materials || mockMaterials;
+  const initialTimelineRecords = storedData?.timelineRecords || mockTimelineRecords;
+  const initialSitePhotos = storedData?.sitePhotos || mockSitePhotos;
+  const initialNotices = storedData?.notices || mockNotices;
+  const initialDispatchRecords = storedData?.dispatchRecords || mockDispatchRecords;
+  const initialMaterialDispatches = storedData?.materialDispatches || mockMaterialDispatches;
+  const initialVideoMeetings = storedData?.videoMeetings || mockVideoMeetings;
+  const initialPassengerSettles = storedData?.passengerSettles || mockPassengerSettles;
+  const initialReplayReports = storedData?.replayReports || mockReplayReports;
+  const initialDrillRecords = storedData?.drillRecords || mockDrillRecords;
 
-  setResourceTeams: (teams) => set({ resourceTeams: teams }),
-  updateResourceTeam: (team) =>
-    set((state) => ({
-      resourceTeams: state.resourceTeams.map((t) => (t.id === team.id ? team : t)),
-    })),
+  function mapById(list: any[], item: any): any[] {
+    return list.map(function (x: any) {
+      return x.id === item.id ? item : x;
+    });
+  }
 
-  setMaterials: (materials) => set({ materials }),
-  updateMaterial: (material) =>
-    set((state) => ({
-      materials: state.materials.map((m) => (m.id === material.id ? material : m)),
-    })),
+  function appendToList(list: any[], item: any): any[] {
+    return list.concat([item]);
+  }
 
-  addTimelineRecord: (record) =>
-    set((state) => ({ timelineRecords: [...state.timelineRecords, record] })),
+  return {
+    events: initialEvents,
+    resourceTeams: initialResourceTeams,
+    materials: initialMaterials,
+    timelineRecords: initialTimelineRecords,
+    sitePhotos: initialSitePhotos,
+    notices: initialNotices,
+    dispatchRecords: initialDispatchRecords,
+    materialDispatches: initialMaterialDispatches,
+    videoMeetings: initialVideoMeetings,
+    passengerSettles: initialPassengerSettles,
+    replayReports: initialReplayReports,
+    drillRecords: initialDrillRecords,
 
-  addSitePhoto: (photo) =>
-    set((state) => ({ sitePhotos: [...state.sitePhotos, photo] })),
+    setEvents: function (events) {
+      persistSet({ events: events });
+    },
+    addEvent: function (event) {
+      persistSet(function (state: any) {
+        return { events: appendToList(state.events, event) };
+      });
+    },
+    updateEvent: function (event) {
+      persistSet(function (state: any) {
+        return { events: mapById(state.events, event) };
+      });
+    },
 
-  addNotice: (notice) =>
-    set((state) => ({ notices: [...state.notices, notice] })),
-  updateNotice: (notice) =>
-    set((state) => ({
-      notices: state.notices.map((n) => (n.id === notice.id ? notice : n)),
-    })),
+    setResourceTeams: function (teams) {
+      persistSet({ resourceTeams: teams });
+    },
+    updateResourceTeam: function (team) {
+      persistSet(function (state: any) {
+        return { resourceTeams: mapById(state.resourceTeams, team) };
+      });
+    },
 
-  addDispatchRecord: (record) =>
-    set((state) => ({ dispatchRecords: [...state.dispatchRecords, record] })),
-  updateDispatchRecord: (record) =>
-    set((state) => ({
-      dispatchRecords: state.dispatchRecords.map((r) => (r.id === record.id ? record : r)),
-    })),
+    setMaterials: function (materials) {
+      persistSet({ materials: materials });
+    },
+    updateMaterial: function (material) {
+      persistSet(function (state: any) {
+        return { materials: mapById(state.materials, material) };
+      });
+    },
 
-  addMaterialDispatch: (dispatch) =>
-    set((state) => ({ materialDispatches: [...state.materialDispatches, dispatch] })),
+    addTimelineRecord: function (record) {
+      persistSet(function (state: any) {
+        return { timelineRecords: appendToList(state.timelineRecords, record) };
+      });
+    },
 
-  addVideoMeeting: (meeting) =>
-    set((state) => ({ videoMeetings: [...state.videoMeetings, meeting] })),
+    addSitePhoto: function (photo) {
+      persistSet(function (state: any) {
+        return { sitePhotos: appendToList(state.sitePhotos, photo) };
+      });
+    },
 
-  addReplayReport: (report) =>
-    set((state) => ({ replayReports: [...state.replayReports, report] })),
-  updateReplayReport: (report) =>
-    set((state) => ({
-      replayReports: state.replayReports.map((r) => (r.id === report.id ? report : r)),
-    })),
+    addNotice: function (notice) {
+      persistSet(function (state: any) {
+        return { notices: appendToList(state.notices, notice) };
+      });
+    },
+    updateNotice: function (notice) {
+      persistSet(function (state: any) {
+        return { notices: mapById(state.notices, notice) };
+      });
+    },
 
-  addDrillRecord: (record) =>
-    set((state) => ({ drillRecords: [...state.drillRecords, record] })),
-  updateDrillRecord: (record) =>
-    set((state) => ({
-      drillRecords: state.drillRecords.map((r) => (r.id === record.id ? record : r)),
-    })),
-}));
+    addDispatchRecord: function (record) {
+      persistSet(function (state: any) {
+        return { dispatchRecords: appendToList(state.dispatchRecords, record) };
+      });
+    },
+    updateDispatchRecord: function (record) {
+      persistSet(function (state: any) {
+        return { dispatchRecords: mapById(state.dispatchRecords, record) };
+      });
+    },
+
+    addMaterialDispatch: function (dispatch) {
+      persistSet(function (state: any) {
+        return { materialDispatches: appendToList(state.materialDispatches, dispatch) };
+      });
+    },
+
+    addVideoMeeting: function (meeting) {
+      persistSet(function (state: any) {
+        return { videoMeetings: appendToList(state.videoMeetings, meeting) };
+      });
+    },
+
+    addReplayReport: function (report) {
+      persistSet(function (state: any) {
+        return { replayReports: appendToList(state.replayReports, report) };
+      });
+    },
+    updateReplayReport: function (report) {
+      persistSet(function (state: any) {
+        return { replayReports: mapById(state.replayReports, report) };
+      });
+    },
+
+    addDrillRecord: function (record) {
+      persistSet(function (state: any) {
+        return { drillRecords: appendToList(state.drillRecords, record) };
+      });
+    },
+    updateDrillRecord: function (record) {
+      persistSet(function (state: any) {
+        return { drillRecords: mapById(state.drillRecords, record) };
+      });
+    },
+  };
+});
 
 export { mockStations, mockTrains };
